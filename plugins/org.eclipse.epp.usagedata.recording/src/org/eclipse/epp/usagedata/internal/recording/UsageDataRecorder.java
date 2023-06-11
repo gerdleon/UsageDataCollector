@@ -30,7 +30,7 @@ public class UsageDataRecorder implements UsageDataEventListener {
 	 * How many events do we queue up before we attempt to write them out to
 	 * disk?
 	 */
-	private static final int EVENT_COUNT_THRESHOLD = 25;
+	private static final int EVENT_COUNT_THRESHOLD = 1;
 
 	/**
 	 * The maximum number of exceptions that the receiver can produce before it

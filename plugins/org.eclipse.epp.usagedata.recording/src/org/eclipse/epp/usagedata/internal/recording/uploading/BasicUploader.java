@@ -11,32 +11,29 @@
 package org.eclipse.epp.usagedata.internal.recording.uploading;
 
 import java.io.BufferedReader;
-import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.InterruptedIOException;
-import java.io.OutputStream;
-import java.io.OutputStreamWriter;
+import java.io.StringReader;
 import java.net.ConnectException;
+import java.net.URI;
 import java.net.UnknownHostException;
-import java.util.ArrayList;
-import java.util.List;
-
-import org.apache.commons.httpclient.HttpClient;
-import org.apache.commons.httpclient.methods.PostMethod;
-import org.apache.commons.httpclient.methods.multipart.FilePart;
-import org.apache.commons.httpclient.methods.multipart.MultipartRequestEntity;
-import org.apache.commons.httpclient.methods.multipart.Part;
-import org.apache.commons.httpclient.params.HttpClientParams;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.net.http.HttpResponse.BodyHandlers;
+import java.time.Duration;
+//import org.apache.commons.httpclient.HttpClient;
+//import org.apache.commons.httpclient.methods.PostMethod;
+//import org.apache.commons.httpclient.methods.multipart.FilePart;
+//import org.apache.commons.httpclient.methods.multipart.MultipartRequestEntity;
+//import org.apache.commons.httpclient.methods.multipart.Part;
+//import org.apache.commons.httpclient.params.HttpClientParams;
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.ListenerList;
 import org.eclipse.core.runtime.Status;
 import org.eclipse.core.runtime.jobs.Job;
-import org.eclipse.epp.usagedata.internal.gathering.events.UsageDataEvent;
 import org.eclipse.epp.usagedata.internal.recording.UsageDataRecordingActivator;
 import org.eclipse.epp.usagedata.internal.recording.settings.UploadSettings;
 
@@ -178,52 +175,72 @@ public class BasicUploader extends AbstractUploader {
 		
 		// TODO Does it make sense to create a custom exception for this?
 		if (!hasUserAuthorizedUpload()) throw new Exception("User has not authorized upload."); //$NON-NLS-1$
+		
+		int retCode = 0;
+		
+		for (File file : getUploadParameters().getFiles()) {
+		
+		HttpRequest request = HttpRequest.newBuilder()
+				  .uri(new URI(getSettings().getUploadUrl()))
+				  .headers("Content-Type", "text/plain;charset=UTF-8", 
+						   HTTP_USERID, getSettings().getUserId(), 
+						   HTTP_WORKSPACEID, getSettings().getWorkspaceId(),
+						   HTTP_TIME, String.valueOf(System.currentTimeMillis()), 
+						   USER_AGENT, getSettings().getUserAgent())
+				  .timeout(Duration.ofSeconds(getSocketTimeout()))
+				  .POST(HttpRequest.BodyPublishers.ofFile(file.toPath()))
+				  .build();
+		
+		HttpClient client = HttpClient.newBuilder().build();
+		
+		HttpResponse<String> response = client.send(request, BodyHandlers.ofString());
+		}
 	
-		/*
-		 * There appears to be some mechanism on some versions of HttpClient that
-		 * allows the insertion of compression technology. For now, we don't worry
-		 * about compressing our output; we can worry about that later.
-		 */
-		PostMethod post = new PostMethod(getSettings().getUploadUrl());
-
-		post.setRequestHeader(HTTP_USERID, getSettings().getUserId());
-		post.setRequestHeader(HTTP_WORKSPACEID, getSettings().getWorkspaceId());
-		post.setRequestHeader(HTTP_TIME, String.valueOf(System.currentTimeMillis()));
-		post.setRequestHeader(USER_AGENT, getSettings().getUserAgent());
-
-		boolean loggingServerActivity = getSettings().isLoggingServerActivity();
-		if (loggingServerActivity) {
-			post.setRequestHeader("LOGGING", "true"); //$NON-NLS-1$ //$NON-NLS-2$
-		}
-		post.setRequestEntity(new MultipartRequestEntity(getFileParts(monitor), post.getParams()));
-		
-		// Configure the HttpClient to timeout after one minute.
-		HttpClientParams httpParameters = new HttpClientParams();
-		httpParameters.setSoTimeout(getSocketTimeout()); // "So" means "socket"; who knew?
-		
-		monitor.worked(1);
-		
-		int result = new HttpClient(httpParameters).executeMethod(post);
-				
-		handleServerResponse(post);
-		
-		monitor.worked(1);
-		
-		post.releaseConnection();
-		
-		// Check the result. HTTP return code of 200 means success.
-		if (result == 200) {
-			for (File file : getUploadParameters().getFiles()) {
-				// TODO what if file delete fails?
-				if (file.exists()) file.delete();
-			}
-		}
+//		/*
+//		 * There appears to be some mechanism on some versions of HttpClient that
+//		 * allows the insertion of compression technology. For now, we don't worry
+//		 * about compressing our output; we can worry about that later.
+//		 */
+//		PostMethod post = new PostMethod(getSettings().getUploadUrl());
+//
+//		post.setRequestHeader(HTTP_USERID, getSettings().getUserId());
+//		post.setRequestHeader(HTTP_WORKSPACEID, getSettings().getWorkspaceId());
+//		post.setRequestHeader(HTTP_TIME, String.valueOf(System.currentTimeMillis()));
+//		post.setRequestHeader(USER_AGENT, getSettings().getUserAgent());
+//
+//		boolean loggingServerActivity = getSettings().isLoggingServerActivity();
+//		if (loggingServerActivity) {
+//			post.setRequestHeader("LOGGING", "true"); //$NON-NLS-1$ //$NON-NLS-2$
+//		}
+//		post.setRequestEntity(new MultipartRequestEntity(getFileParts(monitor), post.getParams()));
+//		
+//		// Configure the HttpClient to timeout after one minute.
+//		HttpClientParams httpParameters = new HttpClientParams();
+//		httpParameters.setSoTimeout(getSocketTimeout()); // "So" means "socket"; who knew?
+//		
+//		monitor.worked(1);
+//		
+//		int result = new HttpClient(httpParameters).executeMethod(post);
+//				
+//		handleServerResponse(post);
+//		
+//		monitor.worked(1);
+//		
+//		post.releaseConnection();
+//		
+//		// Check the result. HTTP return code of 200 means success.
+//		if (result == 200) {
+//			for (File file : getUploadParameters().getFiles()) {
+//				// TODO what if file delete fails?
+//				if (file.exists()) file.delete();
+//			}
+//		}
 		
 		monitor.worked(1);
 		
 		monitor.done();
 		
-		return new UploadResult(result);
+		return new UploadResult(retCode);
 	}
 
 	/**
@@ -235,28 +252,48 @@ public class BasicUploader extends AbstractUploader {
 	 * @return int value specifying a reasonable timeout.
 	 */
 	int getSocketTimeout() {
-		return getUploadParameters().getFiles().length * 60000;
+		return getUploadParameters().getFiles().length * 60;
 	}
 
-	void handleServerResponse(PostMethod post) {
-		// No point in doing any work if nobody's listening.
-		if (!shouldProcessServerResponse()) return;
-		
-		InputStream response = null;
-		try {
-			response = post.getResponseBodyAsStream();
-			handleServerResponse(new BufferedReader(new InputStreamReader(response)));
-		} catch (IOException e) {
-			UsageDataRecordingActivator.getDefault().log(IStatus.WARNING, e, "Exception raised while parsing the server response"); //$NON-NLS-1$
-		} finally {
-			try {
-				response.close();
-			} catch (IOException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			}
-		}
-	}
+//	void handleServerResponse(PostMethod post) {
+//		// No point in doing any work if nobody's listening.
+//		if (!shouldProcessServerResponse()) return;
+//		
+//		InputStream response = null;
+//		try {
+//			response = post.getResponseBodyAsStream();
+//			handleServerResponse(new BufferedReader(new InputStreamReader(response)));
+//		} catch (IOException e) {
+//			UsageDataRecordingActivator.getDefault().log(IStatus.WARNING, e, "Exception raised while parsing the server response"); //$NON-NLS-1$
+//		} finally {
+//			try {
+//				response.close();
+//			} catch (IOException e) {
+//				// TODO Auto-generated catch block
+//				e.printStackTrace();
+//			}
+//		}
+//	}
+	
+//	void handleServerResponse(PostMethod post) {
+//		// No point in doing any work if nobody's listening.
+//		if (!shouldProcessServerResponse()) return;
+//		
+//		InputStream response = null;
+//		try {
+//			response = post.getResponseBodyAsStream();
+//			handleServerResponse(new BufferedReader(new InputStreamReader(response)));
+//		} catch (IOException e) {
+//			UsageDataRecordingActivator.getDefault().log(IStatus.WARNING, e, "Exception raised while parsing the server response"); //$NON-NLS-1$
+//		} finally {
+//			try {
+//				response.close();
+//			} catch (IOException e) {
+//				// TODO Auto-generated catch block
+//				e.printStackTrace();
+//			}
+//		}
+//	}
 
 	private boolean shouldProcessServerResponse() {
 		if (getSettings().isLoggingServerActivity()) return true;
@@ -264,9 +301,10 @@ public class BasicUploader extends AbstractUploader {
 		return false;
 	}
 
-	void handleServerResponse(BufferedReader response) throws IOException {
+	void handleServerResponse(HttpResponse<String> response) throws IOException {
+		BufferedReader reader = new BufferedReader(new StringReader(response.body()));
 		while (true) {
-			String line = response.readLine();
+			String line = reader.readLine();
 			if (line == null) return;
 			if (getSettings().isLoggingServerActivity()) {
 				UsageDataRecordingActivator.getDefault().log(IStatus.INFO, line);
@@ -306,70 +344,70 @@ public class BasicUploader extends AbstractUploader {
 		return getUploadParameters().getSettings();
 	}
 
-	Part[] getFileParts(IProgressMonitor monitor) {
-		List<Part> fileParts = new ArrayList<Part>();
-		for (File file : getUploadParameters().getFiles()) {
-			try {
-				// TODO Hook in a custom FilePart that filters contents.
-				fileParts.add(new FilteredFilePart(monitor, "uploads[]", file)); //$NON-NLS-1$
-			} catch (FileNotFoundException e) {
-				// If an exception occurs while creating the FilePart, 
-				// ignore the error and move on. If this has happened,
-				// then another process may have deleted or moved the file.
-			}
-		}
-		return (Part[]) fileParts.toArray(new Part[fileParts.size()]);
-	}
-	
-	class FilteredFilePart extends FilePart {
-		private final IProgressMonitor monitor;
-
-		public FilteredFilePart(IProgressMonitor monitor, String name, File file)	throws FileNotFoundException {
-			super(name, file);
-			this.monitor = monitor;
-		}
-		
-		@Override
-		protected void sendData(OutputStream out) throws IOException {
-			final BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(out));
-			InputStream input = null;
-			try {
-				input = getSource().createInputStream();
-				new UsageDataFileReader(input).iterate(new UsageDataFileReader.Iterator() {
-					public void header(String header) throws Exception {
-						writer.append(header);
-						writer.append('\n');
-					}
-					public void event(String line, UsageDataEvent event) throws Exception {
-						if (getUploadParameters().getFilter().includes(event)) {
-							writer.append(line);
-							writer.append('\n');
-						} 
-					}					
-				});
-				writer.flush();
-				monitor.worked(1);
-			} catch (Exception e) {
-				if (e instanceof IOException) throw (IOException)e;
-				UsageDataRecordingActivator.getDefault().log(IStatus.WARNING, e, e.getMessage());
-			} finally {
-				input.close();
-			}
-		}
-		
-		/**
-		 * Return the length (size in bytes) of the data we're sending.
-		 * Since we're going to be (potentially) applying filters to the
-		 * data, we don't really know the size so return -1. We could
-		 * compute the size, but that would require either passing twice
-		 * over the file, or keeping the content in memory; both options
-		 * have limited appeal.
-		 */
-		@Override
-		public long length() throws IOException {
-			return -1;
-		}
-	}
+//	Part[] getFileParts(IProgressMonitor monitor) {
+//		List<Part> fileParts = new ArrayList<Part>();
+//		for (File file : getUploadParameters().getFiles()) {
+//			try {
+//				// TODO Hook in a custom FilePart that filters contents.
+//				fileParts.add(new FilteredFilePart(monitor, "uploads[]", file)); //$NON-NLS-1$
+//			} catch (FileNotFoundException e) {
+//				// If an exception occurs while creating the FilePart, 
+//				// ignore the error and move on. If this has happened,
+//				// then another process may have deleted or moved the file.
+//			}
+//		}
+//		return (Part[]) fileParts.toArray(new Part[fileParts.size()]);
+//	}
+//	
+//	class FilteredFilePart extends FilePart {
+//		private final IProgressMonitor monitor;
+//
+//		public FilteredFilePart(IProgressMonitor monitor, String name, File file)	throws FileNotFoundException {
+//			super(name, file);
+//			this.monitor = monitor;
+//		}
+//		
+//		@Override
+//		protected void sendData(OutputStream out) throws IOException {
+//			final BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(out));
+//			InputStream input = null;
+//			try {
+//				input = getSource().createInputStream();
+//				new UsageDataFileReader(input).iterate(new UsageDataFileReader.Iterator() {
+//					public void header(String header) throws Exception {
+//						writer.append(header);
+//						writer.append('\n');
+//					}
+//					public void event(String line, UsageDataEvent event) throws Exception {
+//						if (getUploadParameters().getFilter().includes(event)) {
+//							writer.append(line);
+//							writer.append('\n');
+//						} 
+//					}					
+//				});
+//				writer.flush();
+//				monitor.worked(1);
+//			} catch (Exception e) {
+//				if (e instanceof IOException) throw (IOException)e;
+//				UsageDataRecordingActivator.getDefault().log(IStatus.WARNING, e, e.getMessage());
+//			} finally {
+//				input.close();
+//			}
+//		}
+//		
+//		/**
+//		 * Return the length (size in bytes) of the data we're sending.
+//		 * Since we're going to be (potentially) applying filters to the
+//		 * data, we don't really know the size so return -1. We could
+//		 * compute the size, but that would require either passing twice
+//		 * over the file, or keeping the content in memory; both options
+//		 * have limited appeal.
+//		 */
+//		@Override
+//		public long length() throws IOException {
+//			return -1;
+//		}
+//	}
 
 	public synchronized boolean isUploadInProgress() {
 		return uploadInProgress;
